@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict'),E=require('./engine.js'),C=require('./content.js');let n=0;
+const test=(name,fn)=>{fn();n++;console.log('PASS '+name);};
+const T='2026-11-13';
+test('12 demo cases with title, tag, points',()=>{assert.equal(C.cases.length,12);for(const c of C.cases){assert.ok(c.title&&c.tag&&c.summary);assert.ok(c.points.length>=3);}});
+test('every case builds a valid importable state',()=>{for(const c of C.cases)assert.doesNotThrow(()=>E.validateImport(c.build(T)),c.title);});
+test('every case reaches its expected branch',()=>{for(const c of C.cases){const a=E.assess(c.build(T).profile);assert.ok(a.title.startsWith(c.expect),c.title+' → '+a.title);}});
+test('case teaching points match engine safety logic',()=>{const a=i=>E.assess(C.cases[i].build(T).profile);
+ assert.equal(a(5).drugs[2].excluded.length,1);assert.ok(a(6).drugs.every(d=>d.hold));assert.ok(a(6).adapt);assert.ok(a(7).drugs[0].fit&&a(7).drugs[0].hold);assert.ok(a(10).medCaution.includes('opioid'));assert.ok(a(9).differentials.some(d=>d[0].includes('節律')));});
+test('case 12 follow-up is below response threshold and flags reassessment',()=>{const s=C.cases[11].build(T),last=s.followups.at(-1),o=E.followup(s.profile.isi,last);assert.equal(o.delta,6);assert.equal(o.response,false);assert.ok(o.review.some(r=>r.includes('6–8 週')));});
+test('case 1 follow-up shows response without remission',()=>{const s=C.cases[0].build(T),o=E.followup(s.profile.isi,s.followups[0]);assert.equal(o.response,true);assert.equal(o.remission,false);});
+test('case diaries use consecutive dates ending today',()=>{for(const i of [0,11]){const d=C.cases[i].build(T).diary;assert.equal(d.length,7);assert.equal(d.at(-1).date,T);assert.equal(E.windowPlan(C.cases[i].build(T).profile,d,'07:00').error,undefined);}});
+test('20 quiz items, three levels, valid answers',()=>{assert.equal(C.quiz.length,20);const lv=l=>C.quiz.filter(q=>q.level===l).length;assert.equal(lv('基礎'),8);assert.equal(lv('進階'),6);assert.equal(lv('高階'),6);for(const q of C.quiz){assert.equal(q.options.length,4);assert.ok(Number.isInteger(q.answer)&&q.answer>=0&&q.answer<4);assert.equal(new Set(q.options).size,4);assert.ok(q.explain&&q.ref);}});
+test('quiz calculations agree with engine',()=>{const nt={date:T,bed:'23:00',up:'07:00',sol:30,waso:45,ema:15,nap:20,quality:2};assert.equal(E.night(nt).se.toFixed(1),'81.3');assert.ok(C.quiz[4].options[C.quiz[4].answer].startsWith('81.3'));
+ const s=E.summary([nt,{...nt,date:'2026-11-12',bed:'01:00',sol:0,waso:0,ema:0}]);assert.equal(s.se.toFixed(1),'89.3');assert.ok(C.quiz[15].options[C.quiz[15].answer].startsWith('89.3'));
+ const base={age:'45',months:'8',nights:'5',pattern:'onset',opportunity:'yes',impact:'yes',isi:'20',preference:'cbti',cbti:'none',reviewed:true,flags:[]};const d=Array.from({length:7},(_,i)=>({...nt,date:C.shift(T,i-6),sol:40,waso:45,ema:15}));assert.equal(E.summary(d).tst,380);const w=E.windowPlan(base,d,'07:00');assert.equal(w.bed,'00:30');assert.ok(C.quiz[14].options[C.quiz[14].answer].startsWith('00:30'));
+ assert.equal(E.isi(18).startsWith('15–21'),true);const o=E.followup(20,{isi:11,weeks:6,function:'better',adverse:'none'});assert.ok(o.response&&!o.remission);});
+test('mind map has 8 branches and ≥40 leaves',()=>{assert.equal(C.map.branches.length,8);assert.ok(C.map.branches.reduce((s,b)=>s+b.items.length,0)>=40);});
+console.log(n+' content tests passed');
