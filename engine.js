@@ -2,13 +2,29 @@
 'use strict';
 const FLAGS={urgent:'目前有自傷計畫／急迫危險或急性精神症狀',mania:'疑似躁期：睡得少卻精力旺盛、話多或衝動',unstable:'急性呼吸困難或身體狀況不穩定',sleepy:'明顯白天嗜睡／曾開車打瞌睡',snore:'大聲打鼾',apnea:'被目擊呼吸暫停／夜間嗆醒',htn:'高血壓',rls:'晚間休息時腿部難受想動，活動後緩解',rhythm:'輪班或自由作息時睡得正常、固定時間卻睡不著',pain:'疼痛、搔癢、夜尿或胃食道逆流',mood:'憂鬱、焦慮或創傷相關症狀',bipolar:'雙相情緒障礙病史',epilepsy:'癲癇未穩定控制',pregnant:'懷孕、備孕或哺乳',falls:'跌倒、步態不穩或認知障礙',renal:'CKD／透析',hepatic:'肝功能不全',opioid:'使用 opioid 或其他中樞抑制劑',alcohol:'酒精／藥物使用問題',bzd:'長期使用 BZD／Z-drug',complex:'曾服 Z-drug 後夢遊、夢駕或其他複雜睡眠行為',narcolepsy:'猝睡症',retention:'嚴重尿滯留',glaucoma:'未治療的狹角型青光眼',interact:'使用 CYP3A 抑制／誘導劑或 MAOI',medical:'藥物可能干擾睡眠（類固醇、刺激劑等）'};
 const has=(p,k)=>(p.flags||[]).includes(k);
-function isi(v){if(v===''||v==null)return '尚未填寫';v=Number(v);return v<=7?'0–7：無明顯失眠嚴重度':v<=14?'8–14：閾下失眠':v<=21?'15–21：中度失眠':'22–28：重度失眠';}
+function isi(v){if(v===''||v==null)return '尚未填寫';v=Number(v);if(!Number.isInteger(v)||v<0||v>28)return '分數無效';return v<=7?'0–7：無明顯失眠嚴重度':v<=14?'8–14：閾下失眠':v<=21?'15–21：中度失眠':'22–28：重度失眠';}
+function scoreIsi(items){
+ if(!Array.isArray(items)||items.length!==7)return {error:'ISI 需要七個項目。',complete:false,total:null,answered:0,missing:[]};
+ const scores=items.map(v=>v===''||v==null?null:(typeof v==='number'||typeof v==='string')?Number(v):NaN);
+ if(scores.some(v=>v!==null&&(!Number.isInteger(v)||v<0||v>4)))return {error:'ISI 每項只能為 0–4 的整數。',complete:false,total:null,answered:0,missing:[]};
+ const missing=scores.flatMap((v,i)=>v===null?[i+1]:[]),answered=7-missing.length;
+ return {complete:missing.length===0,total:missing.length?null:scores.reduce((s,v)=>s+v,0),answered,missing,scores};
+}
+function isiItemsError(record){
+ if(record.isiItems==null)return '';
+ const s=scoreIsi(record.isiItems);
+ if(s.error)return s.error;
+ if(!s.complete)return 'ISI 尚有第 '+s.missing.join('、')+' 項未作答；請完成或清除逐項評分。';
+ if(record.isi===''||record.isi==null||s.total!==Number(record.isi))return 'ISI 單項加總與總分不一致。';
+ return '';
+}
 function assess(p){
  const missing=[];for(const [k,n]of Object.entries({age:'年齡',months:'持續月數',nights:'每週夜數',pattern:'主要困擾',opportunity:'睡眠機會',impact:'白天影響',preference:'治療偏好',cbti:'CBT-I 經驗'}))if(p[k]===''||p[k]==null)missing.push(n);
  if(p.reviewed!==true)missing.push('風險項目確認');
  if(missing.length)return {error:'請完成：'+missing.join('、')};
  if(!Number.isInteger(+p.age)||+p.age<0||+p.age>120||!Number.isFinite(+p.months)||+p.months<0||+p.months>1200||!Number.isInteger(+p.nights)||+p.nights<0||+p.nights>7)return {error:'請檢查年齡、月數與每週夜數的有效範圍。'};
  if(p.isi!==''&&p.isi!=null&&(!Number.isInteger(+p.isi)||+p.isi<0||+p.isi>28))return {error:'ISI 必須為 0–28 的整數。'};
+ const itemError=isiItemsError(p);if(itemError)return {error:itemError};
  const enums={pattern:['onset','maintenance','early','mixed','none'],opportunity:['yes','no','unknown'],impact:['yes','no'],preference:['cbti','both','medication','unsure'],cbti:['none','partial','adequate']};
  for(const [k,values]of Object.entries(enums))if(!values.includes(p[k]))return {error:'選單值無效，請重新選擇。'};
  if(!Array.isArray(p.flags)||p.flags.some(k=>!(k in FLAGS)))return {error:'風險資料格式無效。'};
@@ -49,7 +65,7 @@ function summary(rows){if(!rows.length)return null;const vals=rows.map(night);if
 function hhmm(m){m=(Math.round(m)%1440+1440)%1440;return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;}
 function windowPlan(p,rows,wake){const a=assess(p);if(a.error||!a.eligible)return {error:'先完成成人慢性失眠評估並排除急迫風險。'};if(a.adapt)return {error:'有需調整 CBT-I 的共病或嗜睡風險；由治療師訂睡眠時段，本工具不計算限床時間。'};const sorted=[...rows].sort((a,b)=>a.date.localeCompare(b.date));const week=sorted.slice(-7);if(week.length<7)return {error:'至少需要 7 個不同日期的睡眠日誌。'};const gap=(Date.parse(week[6].date)-Date.parse(week[0].date))/86400000;if(gap!==6)return {error:'請提供最近連續 7 日資料，避免以零散日誌計算睡眠時段。'};const s=summary(week);if(!s)return {error:'日誌內容不完整。'};if(s.tst<300)return {error:'平均睡眠少於 5 小時，請由治療師進行評估，不自動縮短睡眠機會。'};const w=timeMin(wake);if(!Number.isFinite(w))return {error:'請選擇固定起床時間。'};const mins=Math.max(360,Math.min(540,Math.ceil(s.tst/15)*15));return {mins,bed:hhmm(w-mins),wake:hhmm(w),summary:s};}
 function followup(base,r){const score=+r.isi,delta=+base-score;const out={delta,remission:score<8,response:delta>=8,review:[]};if(r.adverse!=='none')out.review.push('先評估不良反應，勿依分數改善直接延續原治療。');if(r.adverse==='complex')out.review.push('若與 Z-drug 相關，停止該藥並立即聯絡處方醫師；之後避免該類藥物。');if(r.adverse==='severe')out.review.push('嚴重嗜睡、跌倒或呼吸問題需即時醫療評估，避免駕駛。');if(r.function==='worse'||r.function==='same')out.review.push('白天功能未改善：重新檢視共病、睡眠機會與治療負擔。');if(delta<0)out.review.push('ISI 惡化：重新評估壓力、用藥、躁期、OSA 與依從性。');if(+r.weeks>=6&&!out.response&&!out.remission)out.review.push('療程 6–8 週仍未達反應：確認 CBT-I 是否足量、落實度與診斷，轉睡眠／身心專科。');if(out.remission)out.review.push('分數達緩解門檻，仍須確認日間功能與無不良反應；規劃復發預防。');else if(out.response)out.review.push('達常用療效反應門檻，可持續完成療程並定期複評。');else out.review.push('尚未達常用療效反應門檻；依療程長度與臨床情況追蹤，不直接加藥。');return out;}
-function validateImport(s){if(!s||s.version!==1||!s.profile||!Array.isArray(s.diary)||!Array.isArray(s.followups)||s.diary.length>4000||s.followups.length>1000)throw Error('備份格式不符或資料筆數過多。');const p=s.profile;const allowed=['age','months','nights','pattern','opportunity','impact','isi','preference','cbti','reviewed','flags'];if(Object.keys(p).some(k=>!allowed.includes(k))||!Array.isArray(p.flags)||p.flags.some(k=>!(k in FLAGS)))throw Error('評估欄位格式不符。');if(assess(p).error)throw Error('評估資料不完整或數值無效。');if(s.followups.length&&(p.isi===''||p.isi==null))throw Error('追蹤資料缺少 ISI 基線。');const dates=new Set();for(const d of s.diary){if(!validDate(d.date)||dates.has(d.date)||night(d).error)throw Error('睡眠日誌日期重複或數值無效。');dates.add(d.date);}for(const f of s.followups)if(!validDate(f.date)||!Number.isInteger(+f.isi)||+f.isi<0||+f.isi>28||!['none','mild','complex','severe'].includes(f.adverse)||!['better','same','worse'].includes(f.function)||!Number.isInteger(+f.weeks)||+f.weeks<0||+f.weeks>520||!Number.isInteger(+f.adherence)||+f.adherence<0||+f.adherence>7)throw Error('追蹤資料格式不符。');return {version:1,profile:p,diary:s.diary,followups:s.followups};}
+function validateImport(s){if(!s||s.version!==1||!s.profile||!Array.isArray(s.diary)||!Array.isArray(s.followups)||s.diary.length>4000||s.followups.length>1000)throw Error('備份格式不符或資料筆數過多。');const p=s.profile;const allowed=['age','months','nights','pattern','opportunity','impact','isi','preference','cbti','reviewed','flags','isiItems'];if(Object.keys(p).some(k=>!allowed.includes(k))||!Array.isArray(p.flags)||p.flags.some(k=>!(k in FLAGS)))throw Error('評估欄位格式不符。');if(assess(p).error)throw Error(assess(p).error);if(s.followups.length&&(p.isi===''||p.isi==null))throw Error('追蹤資料缺少 ISI 基線。');const dates=new Set();for(const d of s.diary){if(!validDate(d.date)||dates.has(d.date)||night(d).error)throw Error('睡眠日誌日期重複或數值無效。');dates.add(d.date);}for(const f of s.followups)if(isiItemsError(f)||f.isi===''||f.isi==null||!validDate(f.date)||!Number.isInteger(+f.isi)||+f.isi<0||+f.isi>28||!['none','mild','complex','severe'].includes(f.adverse)||!['better','same','worse'].includes(f.function)||!Number.isInteger(+f.weeks)||+f.weeks<0||+f.weeks>520||!Number.isInteger(+f.adherence)||+f.adherence<0||+f.adherence>7)throw Error('追蹤資料格式不符。');return {version:1,profile:p,diary:s.diary,followups:s.followups};}
 function validDate(d){return /^\d{4}-\d{2}-\d{2}$/.test(d||'')&&!isNaN(Date.parse(d))&&new Date(d+'T12:00:00Z').toISOString().slice(0,10)===d;}
-const api={FLAGS,assess,isi,night,summary,windowPlan,followup,hhmm,validateImport,validDate};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.Insomnia=api;
+const api={FLAGS,assess,isi,scoreIsi,isiItemsError,night,summary,windowPlan,followup,hhmm,validateImport,validDate};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.Insomnia=api;
 })(typeof window!=='undefined'?window:globalThis);
